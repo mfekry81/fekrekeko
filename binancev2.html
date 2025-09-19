@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Binance Real-Time Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #111; color: #eee; }
+    h2, h3 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 6px; text-align: center; border: 1px solid #444; }
+    th { background: #222; cursor: pointer; }
+    th:hover { background: #333; }
+    .green { color: #0f0; font-weight: bold; }
+    .red { color: #f33; font-weight: bold; }
+    .neutral { color: #ccc; }
+    .yellow { color: #ff0; font-weight: bold; }
+    .blue { color: #0af; font-weight: bold; }
+    #marketTable { max-height: 500px; overflow-y: scroll; display: block; }
+    #searchBox { margin: 10px auto; display: block; padding: 6px; width: 300px; }
+    .sort-indicator { margin-left: 5px; font-size: 12px; }
+    .best-buy { background: linear-gradient(to right, rgba(0, 100, 0, 0.2), transparent); }
+    .pump-signal { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0% { background-color: rgba(0, 100, 0, 0.2); }
+      50% { background-color: rgba(0, 100, 0, 0.4); }
+      100% { background-color: rgba(0, 100, 0, 0.2); }
+    }
+  </style>
+</head>
+<body>
+  <h2>🚀 Binance Real-Time Top 10 Dashboard</h2>
+  <div id="datetime" style="text-align: center; margin-bottom: 15px; font-size: 16px;"></div>
+  <table id="coinsTable">
+    <thead>
+      <tr>
+        <th data-sort="string">Symbol <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Price (USDT) <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Change 15m <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Change 1h <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Change 4h <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Change 24h <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">AI Score <span class="sort-indicator">↕</span></th>
+        <th data-sort="string">AI Prediction <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Best Buy <span class="sort-indicator">↕</span></th>
+        <th data-sort="number">Last Update <span class="sort-indicator">↕</span></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>📊 Full Binance USDT Spot Market Watch</h3>
+  <input type="text" id="searchBox" placeholder="🔍 Search Coin (e.g. BTCUSDT)">
+  <div id="marketTable">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="string">Symbol <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Price (USDT) <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Change 15m <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Change 1h <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Change 4h <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Change 24h <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">AI Score <span class="sort-indicator">↕</span></th>
+          <th data-sort="string">AI Prediction <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Best Buy <span class="sort-indicator">↕</span></th>
+          <th data-sort="number">Last Update <span class="sort-indicator">↕</span></th>
+        </tr>
+      </thead>
+      <tbody id="marketBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    // Update datetime display
+    function updateDateTime() {
+      const now = new Date();
+      const options = { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      };
+      document.getElementById('datetime').textContent = now.toLocaleDateString('en-US', options);
+    }
+    
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    const tableBody = document.querySelector("#coinsTable tbody");
+    const marketBody = document.getElementById("marketBody");
+    const searchBox = document.getElementById("searchBox");
+
+    const symbols = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","KAVAUSDT","ADAUSDT","AVAXUSDT","MATICUSDT","DOTUSDT"];
+    const history = {};
+    const lastSignals = {};
+    
+    // Sorting state
+    let currentSort = { column: null, direction: 'asc' };
+    
+    // Add sorting functionality
+    function addSortingListeners() {
+      document.querySelectorAll('th[data-sort]').forEach(header => {
+        header.addEventListener('click', () => {
+          const columnIndex = Array.from(header.parentElement.children).indexOf(header);
+          const sortType = header.getAttribute('data-sort');
+          const table = header.closest('table');
+          const tbody = table.querySelector('tbody');
+          
+          // Update sort indicator
+          document.querySelectorAll('.sort-indicator').forEach(ind => {
+            ind.textContent = '↕';
+          });
+          
+          // Determine new sort direction
+          let direction = 'asc';
+          if (currentSort.column === columnIndex) {
+            direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+          }
+          
+          header.querySelector('.sort-indicator').textContent = direction === 'asc' ? '↑' : '↓';
+          
+          // Sort the table
+          sortTable(tbody, columnIndex, sortType, direction);
+          
+          // Update current sort state
+          currentSort = { column: columnIndex, direction };
+        });
+      });
+    }
+    
+    // Sort table function
+    function sortTable(tbody, columnIndex, sortType, direction) {
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      
+      rows.sort((a, b) => {
+        let aValue = a.cells[columnIndex].getAttribute('data-value') || a.cells[columnIndex].textContent;
+        let bValue = b.cells[columnIndex].getAttribute('data-value') || b.cells[columnIndex].textContent;
+        
+        if (sortType === 'number') {
+          aValue = parseFloat(aValue) || 0;
+          bValue = parseFloat(bValue) || 0;
+        } else {
+          aValue = aValue.toString();
+          bValue = bValue.toString();
+        }
+        
+        if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+      
+      // Remove existing rows
+      while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+      }
+      
+      // Add sorted rows
+      rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function percentChange(oldPrice, newPrice) {
+      return ((newPrice - oldPrice) / oldPrice * 100).toFixed(2);
+    }
+    
+    function formatChange(value) {
+      const num = parseFloat(value);
+      if (isNaN(num)) return `<span class="neutral">0%</span>`;
+      return num >= 0 
+        ? `<span class="green">${num}%</span>` 
+        : `<span class="red">${num}%</span>`;
+    }
+    
+    // Enhanced AI scoring with best buy signal
+    function aiScore(ch15, ch1h, ch4h, ch24, volume, price, symbol) {
+      const c15 = parseFloat(ch15), c1h = parseFloat(ch1h), c4h = parseFloat(ch4h), c24h = parseFloat(ch24);
+      let score = 50;
+      
+      // Weighted changes with more emphasis on shorter timeframes
+      score += c15 * 1.5;
+      score += c1h * 1.2;
+      score += c4h * 1.0;
+      score += c24h * 0.8;
+      
+      // Volume boost (higher volume is better)
+      if (volume > 1000000000) score += 15;
+      else if (volume > 500000000) score += 10;
+      else if (volume > 100000000) score += 5;
+      
+      // Price stability consideration (less volatility is better for buy signals)
+      const volatility = Math.abs(c15) + Math.abs(c1h) + Math.abs(c4h) + Math.abs(c24h);
+      if (volatility < 5) score += 5;
+      
+      // Recent positive momentum bonus
+      if (c15 > 0 && c1h > 0) score += 8;
+      else if (c15 > 0) score += 5;
+      
+      score = Math.max(0, Math.min(100, score));
+      
+      let signal = "Neutral";
+      if (score >= 85) signal = "Strong Pump 🚀";
+      else if (score >= 70) signal = "Potential Pump";
+      else if (score >= 60) signal = "Slight Bullish";
+      else if (score <= 20) signal = "Strong Dump 📉";
+      else if (score <= 40) signal = "Bearish 📉";
+      
+      // Enhanced best buy signal logic
+      let bestBuyScore = 0;
+      if (score >= 75 && c15 > 0.5 && c1h > 0) bestBuyScore += 25;
+      if (c4h > 2 && c24h > 5) bestBuyScore += 20;
+      if (volume > 500000000) bestBuyScore += 15;
+      if (volatility < 8) bestBuyScore += 10;
+      if (score >= 80) bestBuyScore += 30;
+      
+      return { 
+        score: Math.round(score), 
+        signal,
+        bestBuy: bestBuyScore >= 60
+      };
+    }
+    
+    function formatTime(ts) {
+      const d = new Date(ts);
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString();
+    }
+
+    // --- Top 10 Coins (WebSocket) ---
+    symbols.forEach(symbol => {
+      history[symbol] = [];
+      lastSignals[symbol] = "Neutral";
+
+      const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@trade`);
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+        const price = parseFloat(data.p);
+        history[symbol].push({time: Date.now(), price});
+        if (history[symbol].length > 5000) history[symbol].shift();
+
+        const now = Date.now();
+        function getOldPrice(minutes) {
+          const cutoff = now - minutes * 60 * 1000;
+          const older = history[symbol].find(h => h.time >= cutoff);
+          return older ? older.price : price;
+        }
+
+        const ch15 = percentChange(getOldPrice(15), price);
+        const ch1h = percentChange(getOldPrice(60), price);
+        const ch4h = percentChange(getOldPrice(240), price);
+        const ch24 = percentChange(getOldPrice(1440), price);
+
+        let volume = 0;
+        try {
+          const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+          const ticker = await res.json();
+          volume = parseFloat(ticker.quoteVolume || 0);
+        } catch(e) {}
+
+        const { score, signal, bestBuy } = aiScore(ch15, ch1h, ch4h, ch24, volume, price, symbol);
+
+        const row = document.getElementById(symbol) || tableBody.insertRow();
+        row.id = symbol;
+        
+        // Add best buy class for highlighting
+        if (bestBuy) {
+          row.classList.add('best-buy');
+          row.classList.add('pump-signal');
+        } else {
+          row.classList.remove('best-buy');
+          row.classList.remove('pump-signal');
+        }
+        
+        row.innerHTML = `
+          <td data-value="${symbol}">${symbol}</td>
+          <td data-value="${price}">$${price.toFixed(2)}</td>
+          <td data-value="${ch15}">${formatChange(ch15)}</td>
+          <td data-value="${ch1h}">${formatChange(ch1h)}</td>
+          <td data-value="${ch4h}">${formatChange(ch4h)}</td>
+          <td data-value="${ch24}">${formatChange(ch24)}</td>
+          <td data-value="${score}">${score}</td>
+          <td data-value="${signal}">${
+            signal === "Strong Pump 🚀" ? '<span class="green">'+signal+'</span>' :
+            signal === "Potential Pump" ? '<span class="yellow">'+signal+'</span>' :
+            signal === "Slight Bullish" ? '<span class="blue">'+signal+'</span>' :
+            signal === "Bearish 📉" ? '<span class="red">'+signal+'</span>' :
+            signal === "Strong Dump 📉" ? '<span class="red">'+signal+'</span>' :
+            '<span class="neutral">Neutral</span>'
+          }</td>
+          <td data-value="${bestBuy ? 1 : 0}">${bestBuy ? '<span class="green">✅ Best Buy</span>' : '<span class="neutral">-</span>'}</td>
+          <td data-value="${now}">${formatTime(now)}</td>
+        `;
+      };
+    });
+
+    // --- Market Watch (All USDT Spot coins) ---
+    const marketHistory = {};
+    async function loadMarket() {
+      try {
+        const res = await fetch("https://api.binance.com/api/v3/ticker/24hr");
+        const data = await res.json();
+        const usdtPairs = data.filter(item => item.symbol.endsWith("USDT"));
+
+        marketBody.innerHTML = "";
+        const now = Date.now();
+
+        usdtPairs.forEach(item => {
+          const symbol = item.symbol;
+          const price = parseFloat(item.lastPrice);
+          if (!marketHistory[symbol]) marketHistory[symbol] = [];
+          marketHistory[symbol].push({time: now, price});
+          if (marketHistory[symbol].length > 5000) marketHistory[symbol].shift();
+
+          function getOldPrice(minutes) {
+            const cutoff = now - minutes * 60 * 1000;
+            const older = marketHistory[symbol].find(h => h.time >= cutoff);
+            return older ? older.price : price;
+          }
+          
+          const ch15 = percentChange(getOldPrice(15), price);
+          const ch1h = percentChange(getOldPrice(60), price);
+          const ch4h = percentChange(getOldPrice(240), price);
+          const ch24 = parseFloat(item.priceChangePercent).toFixed(2);
+
+          const { score, signal, bestBuy } = aiScore(ch15, ch1h, ch4h, ch24, parseFloat(item.quoteVolume||0), price, symbol);
+
+          const row = document.createElement("tr");
+          
+          // Add best buy class for highlighting
+          if (bestBuy) {
+            row.classList.add('best-buy');
+            row.classList.add('pump-signal');
+          }
+          
+          row.innerHTML = `
+            <td data-value="${symbol}">${symbol}</td>
+            <td data-value="${price}">$${price.toFixed(6)}</td>
+            <td data-value="${ch15}">${formatChange(ch15)}</td>
+            <td data-value="${ch1h}">${formatChange(ch1h)}</td>
+            <td data-value="${ch4h}">${formatChange(ch4h)}</td>
+            <td data-value="${ch24}">${formatChange(ch24)}</td>
+            <td data-value="${score}">${score}</td>
+            <td data-value="${signal}">${
+              signal === "Strong Pump 🚀" ? '<span class="green">'+signal+'</span>' :
+              signal === "Potential Pump" ? '<span class="yellow">'+signal+'</span>' :
+              signal === "Slight Bullish" ? '<span class="blue">'+signal+'</span>' :
+              signal === "Bearish 📉" ? '<span class="red">'+signal+'</span>' :
+              signal === "Strong Dump 📉" ? '<span class="red">'+signal+'</span>' :
+              '<span class="neutral">Neutral</span>'
+            }</td>
+            <td data-value="${bestBuy ? 1 : 0}">${bestBuy ? '<span class="green">✅ Best Buy</span>' : '<span class="neutral">-</span>'}</td>
+            <td data-value="${now}">${formatTime(now)}</td>
+          `;
+          marketBody.appendChild(row);
+        });
+        
+        // Apply current sorting if any
+        if (currentSort.column !== null) {
+          const table = marketBody.closest('table');
+          const header = table.querySelectorAll('th')[currentSort.column];
+          const sortType = header.getAttribute('data-sort');
+          sortTable(marketBody, currentSort.column, sortType, currentSort.direction);
+        }
+      } catch(e) {
+        console.error("Error fetching market data", e);
+      }
+    }
+
+    loadMarket();
+    setInterval(loadMarket, 30000); // update every 30s
+
+    // Search filter
+    searchBox.addEventListener("keyup", () => {
+      const filter = searchBox.value.toUpperCase();
+      const rows = marketBody.getElementsByTagName("tr");
+      for (let i = 0; i < rows.length; i++) {
+        const cell = rows[i].getElementsByTagName("td")[0];
+        if (cell) {
+          const txt = cell.textContent || cell.innerText;
+          rows[i].style.display = txt.toUpperCase().indexOf(filter) > -1 ? "" : "none";
+        }
+      }
+    });
+    
+    // Initialize sorting functionality
+    addSortingListeners();
+  </script>
+</body>
+</html>
